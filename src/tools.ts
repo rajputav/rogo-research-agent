@@ -5,6 +5,7 @@
 
 import type Anthropic from "@anthropic-ai/sdk";
 import { companies, documents, financials } from "./data.ts";
+import { deriveMetrics } from "./metrics.ts";
 
 /** Thrown when a tool cannot service a request. */
 export class ToolError extends Error {}
@@ -39,7 +40,7 @@ export const toolSchemas: Anthropic.Tool[] = [
   {
     name: "getFinancials",
     description:
-      "Get annual and quarterly financials for a company: revenue, gross margin, operating income, net income and free cash flow.",
+      "Get annual and quarterly financials for a company: revenue, gross margin, operating income, net income and free cash flow. Includes a `derived` block with precomputed revenue growth, CAGR and margins.",
     input_schema: {
       type: "object",
       properties: {
@@ -135,8 +136,11 @@ export async function executeTool(
       return searchCompanies(input.query as string);
     case "getCompanyProfile":
       return getCompanyProfile(input.company as string);
-    case "getFinancials":
-      return getFinancials(input.company as string);
+    case "getFinancials": {
+      // Enrich the raw record with precomputed growth and margins (see metrics.ts).
+      const record = await getFinancials(input.company as string);
+      return { ...record, derived: deriveMetrics(record) };
+    }
     case "searchDocuments":
       return searchDocuments(input.query as string, input.company as string | undefined);
     default:

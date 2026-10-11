@@ -16,13 +16,36 @@ app.post("/api/chat", async (req, res) => {
   const message = String(req.body.message ?? "");
   console.log(`\n[chat] ${message}`);
 
+  const startedAt = Date.now();
+  let modelCalls = 0;
+  let toolCalls = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
+
   try {
     const result = await runAgent(message, (event) => {
       switch (event.type) {
         case "iteration":
           console.log(`[agent] iteration ${event.n}`);
           break;
+        case "model_call":
+          modelCalls++;
+          inputTokens += event.inputTokens;
+          outputTokens += event.outputTokens;
+          console.log(
+            `[model] ${event.label.padEnd(12)} ${(event.ms / 1000).toFixed(1)}s  ` +
+              `in=${event.inputTokens.toLocaleString()} out=${event.outputTokens.toLocaleString()}  ` +
+              `stop=${event.stopReason}`,
+          );
+          break;
+        case "draft":
+          console.log(`\n──── draft (research model) ────\n${event.text}`);
+          break;
+        case "final":
+          console.log(`\n──── final (after editor) ────\n${event.text}\n`);
+          break;
         case "tool_start":
+          toolCalls++;
           console.log(`[tool]  → ${event.name} ${JSON.stringify(event.input)}`);
           break;
         case "tool_end":
@@ -33,6 +56,12 @@ app.post("/api/chat", async (req, res) => {
           break;
       }
     });
+
+    console.log(
+      `[done]  total ${((Date.now() - startedAt) / 1000).toFixed(1)}s · ` +
+        `${modelCalls} model calls · ${toolCalls} tools · ` +
+        `in=${inputTokens.toLocaleString()} out=${outputTokens.toLocaleString()}`,
+    );
 
     res.json({ answer: result.answer });
   } catch (err) {

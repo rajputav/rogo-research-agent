@@ -30,7 +30,17 @@ export type AgentEvent =
   | { type: "iteration"; n: number }
   | { type: "tool_start"; name: string; input: unknown }
   | { type: "tool_end"; name: string; ms: number }
-  | { type: "tool_failed"; name: string; message: string };
+  | { type: "tool_failed"; name: string; message: string }
+  | {
+      type: "model_call";
+      label: string;
+      ms: number;
+      inputTokens: number;
+      outputTokens: number;
+      stopReason: string | null;
+    }
+  | { type: "draft"; text: string }
+  | { type: "final"; text: string };
 
 export interface AgentResult {
   answer: string;
@@ -42,6 +52,25 @@ function textOf(message: Anthropic.Message): string {
     .filter((block): block is Anthropic.TextBlock => block.type === "text")
     .map((block) => block.text)
     .join("\n");
+}
+
+/** Calls the model and reports how long it took and how many tokens it used. */
+async function timedCreate(
+  label: string,
+  params: Anthropic.MessageCreateParamsNonStreaming,
+  onEvent: (event: AgentEvent) => void,
+): Promise<Anthropic.Message> {
+  const startedAt = Date.now();
+  const response = await client.messages.create(params);
+  onEvent({
+    type: "model_call",
+    label,
+    ms: Date.now() - startedAt,
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+    stopReason: response.stop_reason,
+  });
+  return response;
 }
 
 export async function runAgent(
@@ -57,13 +86,17 @@ export async function runAgent(
     iterations++;
     onEvent({ type: "iteration", n: iterations });
 
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 16000,
-      system: SYSTEM_PROMPT,
-      tools: toolSchemas,
-      messages,
-    });
+    const response = await timedCreate(
+      `research #${iterations}`,
+      {
+        model: MODEL,
+        max_tokens: 16000,
+        system: SYSTEM_PROMPT,
+        tools: toolSchemas,
+        messages,
+      },
+      onEvent,
+    );
 
     messages.push({ role: "assistant", content: response.content });
 
@@ -106,18 +139,27 @@ export async function runAgent(
       "I looked at a number of sources but ran out of research steps before I could pull the answer together. Try asking a narrower question.";
   }
 
-  // Polish the draft before showing it to the analyst.
-  const edited = await client.messages.create({
-    model: MODEL,
-    max_tokens: 16000,
-    system: EDITOR_PROMPT,
-    messages: [
-      {
-        role: "user",
-        content: `Research transcript:\n${JSON.stringify(messages)}\n\nDraft answer:\n${draft}\n\nRewrite the draft answer.`,
-      },
-    ],
-  });
+  onEvent({ type: "draft", text: draft });
 
-  return { answer: textOf(edited), iterations };
+  // Polish the draft before showing it to the analyst.
+  const edited = await timedCreate(
+    "editor",
+    {
+      model: MODEL,
+      max_tokens: 16000,
+      system: EDITOR_PROMPT,
+      messages: [
+        {
+          role: "user",
+          content: `Research transcript:\n${JSON.stringify(messages)}\n\nDraft answer:\n${draft}\n\nRewrite the draft answer.`,
+        },
+      ],
+    },
+    onEvent,
+  );
+
+  const answer = textOf(edited);
+  onEvent({ type: "final", text: answer });
+
+  return { answer, iterations };
 }

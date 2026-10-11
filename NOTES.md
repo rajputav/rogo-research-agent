@@ -1,6 +1,6 @@
 # Notes
 
-Focus: **answer grounding** (an analyst must be able to trust and check every number) and **latency**. Each change is its own commit; the commit messages have the detail and measurements. The longer write-up is in [`LONG_NOTES.md`](LONG_NOTES.md).
+Focus: **answer grounding** (an analyst must be able to trust and check every number) and **latency**. Each change is its own commit; the commit messages have the detail and measurements. The longer write-up is in [`LONG_NOTES.md`](LONG_NOTES.md). How this was built (Claude Code setup) is in [`HARNESS.md`](HARNESS.md).
 
 **How I chose:** I added logging, then ran the five README questions and checked every figure against `data.ts`. The editor pass cost ~30% of response time and ~50% of input tokens and fixed nothing. Every numeric error came from the model doing arithmetic. Answers mixed management's narrative with the data and cited nothing.
 

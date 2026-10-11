@@ -38,11 +38,8 @@ app.post("/api/chat", async (req, res) => {
               `stop=${event.stopReason}`,
           );
           break;
-        case "draft":
-          console.log(`\n──── draft (research model) ────\n${event.text}`);
-          break;
-        case "final":
-          console.log(`\n──── final (after editor) ────\n${event.text}\n`);
+        case "answer":
+          console.log(`\n──── answer ────\n${event.text}\n`);
           break;
         case "tool_start":
           toolCalls++;

@@ -15,6 +15,8 @@ const SYSTEM_PROMPT = `You are Rogo Research, an assistant that answers question
 
 Use the tools to look up companies, profiles, financials and source documents. Answer the analyst's question.
 
+Lead with the direct answer, then the supporting detail. Use a table when comparing companies or periods. Keep it concise and easy to scan.
+
 Our coverage universe:
 ${companies
   .map(
@@ -23,8 +25,6 @@ ${companies
   )
   .join("\n")}
 `;
-
-const EDITOR_PROMPT = `You are an editor. Rewrite the analyst's draft answer so that it reads clearly and is easy to follow. Keep it brief and conversational. Return only the rewritten answer.`;
 
 export type AgentEvent =
   | { type: "iteration"; n: number }
@@ -39,8 +39,7 @@ export type AgentEvent =
       outputTokens: number;
       stopReason: string | null;
     }
-  | { type: "draft"; text: string }
-  | { type: "final"; text: string };
+  | { type: "answer"; text: string };
 
 export interface AgentResult {
   answer: string;
@@ -79,7 +78,7 @@ export async function runAgent(
 ): Promise<AgentResult> {
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: question }];
 
-  let draft = "";
+  let answer = "";
   let iterations = 0;
 
   while (iterations < MAX_ITERATIONS) {
@@ -105,7 +104,7 @@ export async function runAgent(
     );
 
     if (toolUses.length === 0) {
-      draft = textOf(response);
+      answer = textOf(response);
       break;
     }
 
@@ -134,32 +133,12 @@ export async function runAgent(
     messages.push({ role: "user", content: toolResults });
   }
 
-  if (!draft) {
-    draft =
+  if (!answer) {
+    answer =
       "I looked at a number of sources but ran out of research steps before I could pull the answer together. Try asking a narrower question.";
   }
 
-  onEvent({ type: "draft", text: draft });
-
-  // Polish the draft before showing it to the analyst.
-  const edited = await timedCreate(
-    "editor",
-    {
-      model: MODEL,
-      max_tokens: 16000,
-      system: EDITOR_PROMPT,
-      messages: [
-        {
-          role: "user",
-          content: `Research transcript:\n${JSON.stringify(messages)}\n\nDraft answer:\n${draft}\n\nRewrite the draft answer.`,
-        },
-      ],
-    },
-    onEvent,
-  );
-
-  const answer = textOf(edited);
-  onEvent({ type: "final", text: answer });
+  onEvent({ type: "answer", text: answer });
 
   return { answer, iterations };
 }

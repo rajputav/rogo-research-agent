@@ -2,6 +2,7 @@ import "dotenv/config";
 import { randomUUID } from "node:crypto";
 import express from "express";
 import { runAgent } from "./agent.ts";
+import { prepareHistory } from "./history.ts";
 
 if (!process.env.ANTHROPIC_API_KEY) {
   console.error(
@@ -23,7 +24,8 @@ app.post("/api/chat", async (req, res) => {
     console.log(text.split("\n").map((line) => `[${requestId}] ${line}`).join("\n"));
 
   console.log();
-  log(`[chat] ${message}`);
+  const history = prepareHistory(req.body.history);
+  log(`[chat] ${message}${history.length ? `  (history: ${history.length / 2} exchanges)` : ""}`);
 
   const startedAt = Date.now();
   let modelCalls = 0;
@@ -40,7 +42,7 @@ app.post("/api/chat", async (req, res) => {
   const send = (data: object) => res.write(`${JSON.stringify(data)}\n`);
 
   try {
-    const result = await runAgent(message, (event) => {
+    const result = await runAgent(message, history, (event) => {
       // The answer arrives in the final "done" line instead.
       if (event.type !== "answer") send(event);
 

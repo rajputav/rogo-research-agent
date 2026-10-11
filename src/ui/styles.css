@@ -22,6 +22,33 @@ body {
   gap: 20px;
 }
 
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.new-conversation {
+  flex: none;
+  border: 1px solid #dde2e8;
+  background: #fff;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: #33414f;
+  cursor: pointer;
+}
+
+.new-conversation:hover:not(:disabled) {
+  border-color: #b9c2cc;
+}
+
+.new-conversation:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 header h1 {
   margin: 0 0 4px;
   font-size: 20px;

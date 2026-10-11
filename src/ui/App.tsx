@@ -9,6 +9,8 @@ interface Message {
   text: string;
   steps?: Step[];
   summary?: string;
+  /** Failed replies aren't sent back as conversation history. */
+  failed?: boolean;
 }
 
 const STATUS_ICON: Record<Step["status"], string> = { running: "◌", done: "✓", failed: "✕" };
@@ -62,6 +64,11 @@ export function App() {
   async function send(question: string) {
     if (!question.trim() || busy) return;
 
+    // Earlier exchanges give follow-ups their context; the server validates and trims them.
+    const history = messages
+      .filter((message) => !message.failed)
+      .map(({ role, text }) => ({ role, text }));
+
     setMessages((prev) => [...prev, { role: "user", text: question }]);
     setInput("");
     setBusy(true);
@@ -75,7 +82,7 @@ export function App() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: question }),
+        body: JSON.stringify({ message: question, history }),
       });
       if (!res.ok || !res.body) throw new Error(`server responded ${res.status}`);
 
@@ -110,6 +117,7 @@ export function App() {
       reply = {
         role: "assistant",
         text: `Something went wrong: ${message}`,
+        failed: true,
         steps: finishSteps(steps, Date.now()),
         summary: `Stopped after ${((Date.now() - startedAt) / 1000).toFixed(1)}s`,
       };
@@ -122,8 +130,17 @@ export function App() {
   return (
     <div className="app">
       <header>
-        <h1>Rogo Research</h1>
-        <p>Ask a question about a company in our coverage universe.</p>
+        <div>
+          <h1>Rogo Research</h1>
+          <p>Ask a question about a company in our coverage universe.</p>
+        </div>
+        <button
+          className="new-conversation"
+          onClick={() => setMessages([])}
+          disabled={busy || messages.length === 0}
+        >
+          New conversation
+        </button>
       </header>
 
       <div className="transcript">

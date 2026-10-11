@@ -4,6 +4,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { companies } from "./data.ts";
+import type { HistoryTurn } from "./history.ts";
 import { executeTool, ToolError, toolSchemas } from "./tools.ts";
 
 const MODEL = process.env.ROGO_MODEL ?? "claude-sonnet-5";
@@ -29,6 +30,7 @@ Analysts act on your answers, so every claim must be traceable to a source:
 - Don't state anything the sources don't support. Your own interpretation is welcome but mark it as such (e.g. "My read:"), and don't invent numbers, trends or causes.
 - For subjective questions (e.g. "better business"), state the criteria you're judging on.
 - If a company name could match more than one company (e.g. "Acme"), say which you assumed or cover each.
+- Earlier turns in this conversation are context for what the analyst means, not sources. Before citing a figure or claim again, look it up with a tool in the current turn and cite that result.
 
 Lead with the direct answer, then the supporting detail. Use a table when comparing companies or periods. Keep it concise and easy to scan.
 
@@ -94,9 +96,14 @@ async function timedCreate(
 
 export async function runAgent(
   question: string,
+  history: HistoryTurn[],
   onEvent: (event: AgentEvent) => void,
 ): Promise<AgentResult> {
-  const messages: Anthropic.MessageParam[] = [{ role: "user", content: question }];
+  // Earlier exchanges come first so they form a stable, cacheable prefix.
+  const messages: Anthropic.MessageParam[] = [
+    ...history.map((turn): Anthropic.MessageParam => ({ role: turn.role, content: turn.text })),
+    { role: "user", content: question },
+  ];
 
   let answer = "";
   let iterations = 0;

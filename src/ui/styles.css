@@ -192,6 +192,14 @@ header p {
   min-width: 320px;
 }
 
+/* The answer as it streams in, below the live steps. */
+.draft {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #eef1f5;
+  color: #12181f;
+}
+
 /* Research progress: live in the pending bubble, collapsed above finished answers. */
 .steps {
   list-style: none;

@@ -60,6 +60,7 @@ export function App() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<Step[]>([]);
+  const [draft, setDraft] = useState("");
 
   async function send(question: string) {
     if (!question.trim() || busy) return;
@@ -73,8 +74,10 @@ export function App() {
     setInput("");
     setBusy(true);
     setProgress([]);
+    setDraft("");
 
     let steps: Step[] = [];
+    let text = "";
     const startedAt = Date.now();
     let reply: Message;
 
@@ -98,6 +101,16 @@ export function App() {
         buffer = lines.pop() ?? "";
         for (const line of lines.filter(Boolean)) {
           last = JSON.parse(line) as StreamEvent;
+          if (last.type === "text_delta") {
+            text += last.text;
+            setDraft(text);
+            continue;
+          }
+          // Text written before a tool call is preamble, not the answer; start over.
+          if (last.type === "tool_start" && text) {
+            text = "";
+            setDraft("");
+          }
           steps = applyEvent(steps, last, Date.now());
           setProgress(steps);
         }
@@ -175,8 +188,15 @@ export function App() {
         )}
 
         {busy && (
-          <div className="bubble assistant pending">
+          <div className="bubble assistant pending markdown">
             {progress.length === 0 ? "Starting research…" : <StepList steps={progress} />}
+            {draft && (
+              <div className="draft">
+                <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeCitations]}>
+                  {draft}
+                </Markdown>
+              </div>
+            )}
           </div>
         )}
       </div>

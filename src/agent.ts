@@ -59,6 +59,8 @@ export type AgentEvent =
       outputTokens: number;
       stopReason: string | null;
     }
+  /** Text as the model writes it. Text from a turn that goes on to call tools is preamble, not the answer. */
+  | { type: "text_delta"; text: string }
   | { type: "answer"; text: string };
 
 export interface AgentResult {
@@ -73,14 +75,19 @@ function textOf(message: Anthropic.Message): string {
     .join("\n");
 }
 
-/** Calls the model and reports how long it took and how many tokens it used. */
-async function timedCreate(
+/**
+ * Calls the model with streaming, forwarding text as it's written so the UI can show
+ * the answer live, and reports how long the call took and how many tokens it used.
+ */
+async function callModel(
   label: string,
-  params: Anthropic.MessageCreateParamsNonStreaming,
+  params: Anthropic.MessageStreamParams,
   onEvent: (event: AgentEvent) => void,
 ): Promise<Anthropic.Message> {
   const startedAt = Date.now();
-  const response = await client.messages.create(params);
+  const stream = client.messages.stream(params);
+  stream.on("text", (text) => onEvent({ type: "text_delta", text }));
+  const response = await stream.finalMessage();
   onEvent({
     type: "model_call",
     label,
@@ -112,7 +119,7 @@ export async function runAgent(
     iterations++;
     onEvent({ type: "iteration", n: iterations });
 
-    const response = await timedCreate(
+    const response = await callModel(
       `research #${iterations}`,
       {
         model: MODEL,

@@ -45,6 +45,8 @@ app.post("/api/chat", async (req, res) => {
     const result = await runAgent(message, history, (event) => {
       // The answer arrives in the final "done" line instead.
       if (event.type !== "answer") send(event);
+      // Deltas are forwarded to the UI but too noisy to log; the full answer is logged below.
+      if (event.type === "text_delta") return;
 
       switch (event.type) {
         case "iteration":

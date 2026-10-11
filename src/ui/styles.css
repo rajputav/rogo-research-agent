@@ -22,6 +22,33 @@ body {
   gap: 20px;
 }
 
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.new-conversation {
+  flex: none;
+  border: 1px solid #dde2e8;
+  background: #fff;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: #33414f;
+  cursor: pointer;
+}
+
+.new-conversation:hover:not(:disabled) {
+  border-color: #b9c2cc;
+}
+
+.new-conversation:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 header h1 {
   margin: 0 0 4px;
   font-size: 20px;
@@ -83,8 +110,161 @@ header p {
   border: 1px solid #e4e8ed;
 }
 
+/* Rendered markdown answers: normal whitespace, room for tables. */
+.bubble.markdown {
+  white-space: normal;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  font-size: 15px;
+  margin: 16px 0 6px;
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol {
+  margin: 8px 0;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 20px;
+}
+
+.markdown li + li {
+  margin-top: 4px;
+}
+
+.markdown table {
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 13px;
+}
+
+.markdown th,
+.markdown td {
+  border: 1px solid #e4e8ed;
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown th {
+  background: #f6f7f9;
+  font-weight: 600;
+}
+
+.markdown code {
+  font-size: 12px;
+  background: #f1f3f6;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.cite {
+  display: inline-block;
+  margin-left: 3px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: #eef1f5;
+  color: #62707f;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+
 .bubble.pending {
   color: #8b97a3;
+  white-space: normal;
+  min-width: 320px;
+}
+
+/* The answer as it streams in, below the live steps. */
+.draft {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #eef1f5;
+  color: #12181f;
+}
+
+/* Research progress: live in the pending bubble, collapsed above finished answers. */
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+}
+
+.step {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 0;
+  color: #33414f;
+}
+
+.step-icon {
+  width: 12px;
+  flex: none;
+  text-align: center;
+}
+
+.step.running .step-icon {
+  color: #8b97a3;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.step.done .step-icon {
+  color: #2f8f5b;
+}
+
+.step.failed .step-icon,
+.step-detail {
+  color: #c2413b;
+}
+
+.step-label {
+  flex: 1;
+}
+
+.step-ms {
+  color: #8b97a3;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.trace {
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #eef1f5;
+}
+
+.trace summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #62707f;
+}
+
+.trace .steps {
+  margin-top: 6px;
 }
 
 .composer {

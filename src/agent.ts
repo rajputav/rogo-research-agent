@@ -4,9 +4,10 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { companies } from "./data.ts";
-import { executeTool, toolSchemas } from "./tools.ts";
+import type { HistoryTurn } from "./history.ts";
+import { executeTool, ToolError, toolSchemas } from "./tools.ts";
 
-const MODEL = process.env.ROGO_MODEL ?? "claude-sonnet-5";
+const MODEL = process.env.ROGO_MODEL ?? "claude-sonnet-5-5";
 const MAX_ITERATIONS = 12;
 
 const client = new Anthropic();
@@ -14,6 +15,24 @@ const client = new Anthropic();
 const SYSTEM_PROMPT = `You are Rogo Research, an assistant that answers questions about companies for financial analysts.
 
 Use the tools to look up companies, profiles, financials and source documents. Answer the analyst's question.
+
+Analysts act on your answers, so every claim must be traceable to a source:
+
+- Cite every figure and factual claim inline, immediately after it:
+  - getFinancials → [Financials: TICKER FY2025] (name the period the figure comes from)
+  - getCompanyProfile or the coverage list below → [Profile: TICKER]
+  - searchDocuments → the document id, e.g. [DOC-GLBX-002]
+  In tables, cite in the cell or once per row.
+- For growth rates, CAGR and margins, quote the figures in the \`derived\` block of getFinancials results rather than calculating your own. If you need a figure it doesn't provide, show the calculation.
+- Treat getFinancials as the record for numbers and documents as management's account. For questions about growth or business quality, check the documents too. When the two disagree (e.g. a growth rate management quotes vs. the one in the financials), report both with their citations and point out the difference.
+- State the fiscal period for every figure. If you compare different periods (e.g. one company's FY2025 with another's FY2024 because a year is unfiled), say so.
+- Surface any \`warnings\` and unreported (null) years from tool results; never estimate a missing figure.
+- Don't state anything the sources don't support. Your own interpretation is welcome but mark it as such (e.g. "My read:"), and don't invent numbers, trends or causes.
+- For subjective questions (e.g. "better business"), state the criteria you're judging on.
+- If a company name could match more than one company (e.g. "Acme"), say which you assumed or cover each.
+- Earlier turns in this conversation are context for what the analyst means, not sources. Before citing a figure or claim again, look it up with a tool in the current turn and cite that result.
+
+Lead with the direct answer, then the supporting detail. Use a table when comparing companies or periods. Keep it concise and easy to scan.
 
 Our coverage universe:
 ${companies
@@ -24,13 +43,25 @@ ${companies
   .join("\n")}
 `;
 
-const EDITOR_PROMPT = `You are an editor. Rewrite the analyst's draft answer so that it reads clearly and is easy to follow. Keep it brief and conversational. Return only the rewritten answer.`;
-
 export type AgentEvent =
   | { type: "iteration"; n: number }
-  | { type: "tool_start"; name: string; input: unknown }
-  | { type: "tool_end"; name: string; ms: number }
-  | { type: "tool_failed"; name: string; message: string };
+  | { type: "tool_start"; id: string; name: string; input: unknown }
+  | { type: "tool_end"; id: string; name: string; ms: number }
+  | { type: "tool_failed"; id: string; name: string; message: string }
+  | {
+      type: "model_call";
+      label: string;
+      ms: number;
+      /** Uncached input tokens. Total input = inputTokens + cacheReadTokens + cacheWriteTokens. */
+      inputTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+      outputTokens: number;
+      stopReason: string | null;
+    }
+  /** Text as the model writes it. Text from a turn that goes on to call tools is preamble, not the answer. */
+  | { type: "text_delta"; text: string }
+  | { type: "answer"; text: string };
 
 export interface AgentResult {
   answer: string;
@@ -44,26 +75,73 @@ function textOf(message: Anthropic.Message): string {
     .join("\n");
 }
 
+/**
+ * Calls the model with streaming, forwarding text as it's written so the UI can show
+ * the answer live, and reports how long the call took and how many tokens it used.
+ */
+async function callModel(
+  label: string,
+  params: Anthropic.MessageStreamParams,
+  onEvent: (event: AgentEvent) => void,
+): Promise<Anthropic.Message> {
+  const startedAt = Date.now();
+  const stream = client.messages.stream(params);
+  stream.on("text", (text) => onEvent({ type: "text_delta", text }));
+  const response = await stream.finalMessage();
+  onEvent({
+    type: "model_call",
+    label,
+    ms: Date.now() - startedAt,
+    inputTokens: response.usage.input_tokens,
+    cacheReadTokens: response.usage.cache_read_input_tokens ?? 0,
+    cacheWriteTokens: response.usage.cache_creation_input_tokens ?? 0,
+    outputTokens: response.usage.output_tokens,
+    stopReason: response.stop_reason,
+  });
+  return response;
+}
+
 export async function runAgent(
   question: string,
+  history: HistoryTurn[],
   onEvent: (event: AgentEvent) => void,
 ): Promise<AgentResult> {
-  const messages: Anthropic.MessageParam[] = [{ role: "user", content: question }];
+  // Earlier exchanges come first so they form a stable, cacheable prefix.
+  const messages: Anthropic.MessageParam[] = [
+    ...history.map((turn): Anthropic.MessageParam => ({ role: turn.role, content: turn.text })),
+    { role: "user", content: question },
+  ];
 
-  let draft = "";
+  let answer = "";
   let iterations = 0;
 
   while (iterations < MAX_ITERATIONS) {
     iterations++;
     onEvent({ type: "iteration", n: iterations });
 
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 16000,
-      system: SYSTEM_PROMPT,
-      tools: toolSchemas,
-      messages,
-    });
+    const response = await callModel(
+      `research #${iterations}`,
+      {
+        model: MODEL,
+        max_tokens: 16000,
+        // Cache the static prefix (tools + system prompt) explicitly, and let top-level
+        // cache_control cache the growing transcript, so each iteration re-reads the
+        // previous one's prefix instead of reprocessing it.
+        cache_control: { type: "ephemeral" },
+        system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
+        tools: toolSchemas,
+        messages,
+      },
+      onEvent,
+    );
+
+    // A declined request returns no usable content; say so rather than falling through to
+    // the "ran out of research steps" message.
+    if (response.stop_reason === "refusal") {
+      answer =
+        "I can't help with that request. Try rephrasing it as a question about a company in our coverage universe.";
+      break;
+    }
 
     messages.push({ role: "assistant", content: response.content });
 
@@ -72,50 +150,48 @@ export async function runAgent(
     );
 
     if (toolUses.length === 0) {
-      draft = textOf(response);
+      answer = textOf(response);
       break;
     }
 
-    const toolResults: Anthropic.ToolResultBlockParam[] = [];
+    // Tool calls within a turn are independent, so run them concurrently.
+    // Promise.all preserves order, keeping results aligned with the tool_use blocks.
+    const toolResults: Anthropic.ToolResultBlockParam[] = await Promise.all(
+      toolUses.map(async (use): Promise<Anthropic.ToolResultBlockParam> => {
+        const startedAt = Date.now();
+        onEvent({ type: "tool_start", id: use.id, name: use.name, input: use.input });
 
-    for (const use of toolUses) {
-      const startedAt = Date.now();
-      onEvent({ type: "tool_start", name: use.name, input: use.input });
+        let result: Anthropic.ToolResultBlockParam;
+        try {
+          const output = await executeTool(use.name, use.input as Record<string, unknown>);
+          result = { type: "tool_result", tool_use_id: use.id, content: JSON.stringify(output) };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          onEvent({ type: "tool_failed", id: use.id, name: use.name, message });
+          // ToolErrors explain how to recover, so the model sees them. Anything else is a
+          // bug in our code: keep its details out of the transcript.
+          result = {
+            type: "tool_result",
+            tool_use_id: use.id,
+            is_error: true,
+            content: err instanceof ToolError ? message : "Internal error while running the tool.",
+          };
+        }
 
-      let content: string;
-      try {
-        const output = await executeTool(use.name, use.input as Record<string, unknown>);
-        content = JSON.stringify(output);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        content = `${use.name} returned: ${message}`;
-        onEvent({ type: "tool_failed", name: use.name, message });
-      }
-
-      onEvent({ type: "tool_end", name: use.name, ms: Date.now() - startedAt });
-      toolResults.push({ type: "tool_result", tool_use_id: use.id, content });
-    }
+        onEvent({ type: "tool_end", id: use.id, name: use.name, ms: Date.now() - startedAt });
+        return result;
+      }),
+    );
 
     messages.push({ role: "user", content: toolResults });
   }
 
-  if (!draft) {
-    draft =
+  if (!answer) {
+    answer =
       "I looked at a number of sources but ran out of research steps before I could pull the answer together. Try asking a narrower question.";
   }
 
-  // Polish the draft before showing it to the analyst.
-  const edited = await client.messages.create({
-    model: MODEL,
-    max_tokens: 16000,
-    system: EDITOR_PROMPT,
-    messages: [
-      {
-        role: "user",
-        content: `Research transcript:\n${JSON.stringify(messages)}\n\nDraft answer:\n${draft}\n\nRewrite the draft answer.`,
-      },
-    ],
-  });
+  onEvent({ type: "answer", text: answer });
 
-  return { answer: textOf(edited), iterations };
+  return { answer, iterations };
 }

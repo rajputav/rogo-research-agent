@@ -5,6 +5,7 @@
 
 import type Anthropic from "@anthropic-ai/sdk";
 import { companies, documents, financials } from "./data.ts";
+import { deriveMetrics } from "./metrics.ts";
 
 /** Thrown when a tool cannot service a request. */
 export class ToolError extends Error {}
@@ -39,7 +40,7 @@ export const toolSchemas: Anthropic.Tool[] = [
   {
     name: "getFinancials",
     description:
-      "Get annual and quarterly financials for a company: revenue, gross margin, operating income, net income and free cash flow.",
+      "Get annual and quarterly financials for a company: revenue, gross margin, operating income, net income and free cash flow. Includes a `derived` block with precomputed revenue growth, CAGR and margins.",
     input_schema: {
       type: "object",
       properties: {
@@ -66,6 +67,37 @@ export const toolSchemas: Anthropic.Tool[] = [
   },
 ];
 
+/**
+ * Error for a company name we don't recognise. Lookups stay exact, as a real API's would,
+ * but the message suggests likely matches (by ticker or partial name) so the model can retry.
+ */
+export function unknownCompany(company: string): ToolError {
+  const needle = String(company).trim().toLowerCase();
+  const candidates = needle
+    ? companies.filter(
+        (c) =>
+          c.ticker.toLowerCase() === needle ||
+          c.name.toLowerCase().includes(needle) ||
+          needle.includes(c.name.toLowerCase().split(" ")[0]),
+      )
+    : [];
+  const list = (cs: typeof companies) => cs.map((c) => `"${c.name}" (${c.ticker})`).join(", ");
+
+  if (candidates.length === 1) {
+    return new ToolError(
+      `no company named "${company}". Did you mean ${list(candidates)}? Call again with that exact name.`,
+    );
+  }
+  if (candidates.length > 1) {
+    return new ToolError(
+      `"${company}" matches more than one company: ${list(candidates)}. Call again with an exact name, and tell the analyst which one you assumed (or cover each).`,
+    );
+  }
+  return new ToolError(
+    `no company named "${company}" in the coverage universe. Use an exact name: ${list(companies)}.`,
+  );
+}
+
 async function searchCompanies(query: string) {
   await sleep(250);
   const needle = String(query).toLowerCase();
@@ -81,7 +113,7 @@ async function getCompanyProfile(company: string) {
   await sleep(450);
   const match = companies.find((c) => c.name === company);
   if (!match) {
-    throw new ToolError(`no profile found for "${company}"`);
+    throw unknownCompany(company);
   }
   return match;
 }
@@ -90,7 +122,7 @@ async function getFinancials(company: string) {
   await sleep(800);
   const record = financials.find((f) => f.company === company);
   if (!record) {
-    throw new ToolError(`no financials found for "${company}"`);
+    throw unknownCompany(company);
   }
   return record;
 }
@@ -102,8 +134,13 @@ async function searchDocuments(query: string, company?: string) {
   // The upstream document index rejects long queries.
   if (terms.length > 6) {
     throw new ToolError(
-      `document search accepts at most 6 terms (received ${terms.length})`,
+      `document search accepts at most 6 terms (received ${terms.length}). Retry with 6 or fewer keywords, dropping filler words.`,
     );
+  }
+
+  // An unknown company filter would otherwise return no results, which reads as "no documents".
+  if (company && !companies.some((c) => c.name === company)) {
+    throw unknownCompany(company);
   }
 
   const pool = company
@@ -135,11 +172,16 @@ export async function executeTool(
       return searchCompanies(input.query as string);
     case "getCompanyProfile":
       return getCompanyProfile(input.company as string);
-    case "getFinancials":
-      return getFinancials(input.company as string);
+    case "getFinancials": {
+      // Enrich the raw record with precomputed growth and margins (see metrics.ts).
+      const record = await getFinancials(input.company as string);
+      return { ...record, derived: deriveMetrics(record) };
+    }
     case "searchDocuments":
       return searchDocuments(input.query as string, input.company as string | undefined);
     default:
-      throw new ToolError(`unknown tool "${name}"`);
+      throw new ToolError(
+        `unknown tool "${name}". Available tools: ${toolSchemas.map((t) => t.name).join(", ")}.`,
+      );
   }
 }

@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import express from "express";
 import { runAgent } from "./agent.ts";
 
@@ -14,7 +15,15 @@ app.use(express.json());
 
 app.post("/api/chat", async (req, res) => {
   const message = String(req.body.message ?? "");
-  console.log(`\n[chat] ${message}`);
+
+  // Prefix every log line with a short request id so concurrent requests can be told apart
+  // (`grep <id>` gives one request's full trace, answer included).
+  const requestId = randomUUID().slice(0, 8);
+  const log = (text: string) =>
+    console.log(text.split("\n").map((line) => `[${requestId}] ${line}`).join("\n"));
+
+  console.log();
+  log(`[chat] ${message}`);
 
   const startedAt = Date.now();
   let modelCalls = 0;
@@ -25,6 +34,7 @@ app.post("/api/chat", async (req, res) => {
   // Stream progress to the UI as newline-delimited JSON, ending with a "done" or "error" line.
   res.setHeader("Content-Type", "application/x-ndjson");
   res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("X-Request-Id", requestId);
   const send = (data: object) => res.write(`${JSON.stringify(data)}\n`);
 
   try {
@@ -34,44 +44,44 @@ app.post("/api/chat", async (req, res) => {
 
       switch (event.type) {
         case "iteration":
-          console.log(`[agent] iteration ${event.n}`);
+          log(`[agent] iteration ${event.n}`);
           break;
         case "model_call":
           modelCalls++;
           inputTokens += event.inputTokens;
           outputTokens += event.outputTokens;
-          console.log(
+          log(
             `[model] ${event.label.padEnd(12)} ${(event.ms / 1000).toFixed(1)}s  ` +
               `in=${event.inputTokens.toLocaleString()} out=${event.outputTokens.toLocaleString()}  ` +
               `stop=${event.stopReason}`,
           );
           break;
         case "answer":
-          console.log(`\n──── answer ────\n${event.text}\n`);
+          log(`──── answer ────\n${event.text}`);
           break;
         case "tool_start":
           toolCalls++;
-          console.log(`[tool]  → ${event.name} ${JSON.stringify(event.input)}`);
+          log(`[tool]  → ${event.name} ${JSON.stringify(event.input)}`);
           break;
         case "tool_end":
-          console.log(`[tool]  ← ${event.name} (${event.ms}ms)`);
+          log(`[tool]  ← ${event.name} (${event.ms}ms)`);
           break;
         case "tool_failed":
-          console.log(`[tool]  ! ${event.name}: ${event.message}`);
+          log(`[tool]  ! ${event.name}: ${event.message}`);
           break;
       }
     });
 
-    console.log(
+    log(
       `[done]  total ${((Date.now() - startedAt) / 1000).toFixed(1)}s · ` +
         `${modelCalls} model calls · ${toolCalls} tools · ` +
         `in=${inputTokens.toLocaleString()} out=${outputTokens.toLocaleString()}`,
     );
 
-    send({ type: "done", answer: result.answer, ms: Date.now() - startedAt });
+    send({ type: "done", answer: result.answer, ms: Date.now() - startedAt, requestId });
   } catch (err) {
-    console.error(err);
-    send({ type: "error", message: String(err) });
+    log(`[error] ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
+    send({ type: "error", message: String(err), requestId });
   }
   res.end();
 });

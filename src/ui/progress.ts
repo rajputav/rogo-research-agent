@@ -18,8 +18,8 @@ export interface Step {
 /** Lines the server streams: agent events, then one "done" or "error" line. */
 export type StreamEvent =
   | AgentEvent
-  | { type: "done"; answer: string; ms: number }
-  | { type: "error"; message: string };
+  | { type: "done"; answer: string; ms: number; requestId: string }
+  | { type: "error"; message: string; requestId: string };
 
 export function toolLabel(name: string, input: unknown): string {
   const args = (input ?? {}) as Record<string, string | undefined>;

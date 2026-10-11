@@ -99,7 +99,10 @@ export function App() {
       if (last?.type === "done") {
         reply = { role: "assistant", text: last.answer, steps, summary: summarize(steps, last.ms) };
       } else {
-        const reason = last?.type === "error" ? last.message : "the response ended unexpectedly";
+        const reason =
+          last?.type === "error"
+            ? `${last.message} (request ${last.requestId})`
+            : `the response ended unexpectedly (request ${res.headers.get("X-Request-Id")})`;
         throw new Error(reason);
       }
     } catch (err) {

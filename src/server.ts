@@ -22,8 +22,16 @@ app.post("/api/chat", async (req, res) => {
   let inputTokens = 0;
   let outputTokens = 0;
 
+  // Stream progress to the UI as newline-delimited JSON, ending with a "done" or "error" line.
+  res.setHeader("Content-Type", "application/x-ndjson");
+  res.setHeader("Cache-Control", "no-cache");
+  const send = (data: object) => res.write(`${JSON.stringify(data)}\n`);
+
   try {
     const result = await runAgent(message, (event) => {
+      // The answer arrives in the final "done" line instead.
+      if (event.type !== "answer") send(event);
+
       switch (event.type) {
         case "iteration":
           console.log(`[agent] iteration ${event.n}`);
@@ -60,11 +68,12 @@ app.post("/api/chat", async (req, res) => {
         `in=${inputTokens.toLocaleString()} out=${outputTokens.toLocaleString()}`,
     );
 
-    res.json({ answer: result.answer });
+    send({ type: "done", answer: result.answer, ms: Date.now() - startedAt });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: String(err) });
+    send({ type: "error", message: String(err) });
   }
+  res.end();
 });
 
 const port = Number(process.env.PORT ?? 8787);

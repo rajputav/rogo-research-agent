@@ -29,6 +29,8 @@ app.post("/api/chat", async (req, res) => {
   let modelCalls = 0;
   let toolCalls = 0;
   let inputTokens = 0;
+  let cacheReadTokens = 0;
+  let cacheWriteTokens = 0;
   let outputTokens = 0;
 
   // Stream progress to the UI as newline-delimited JSON, ending with a "done" or "error" line.
@@ -49,10 +51,13 @@ app.post("/api/chat", async (req, res) => {
         case "model_call":
           modelCalls++;
           inputTokens += event.inputTokens;
+          cacheReadTokens += event.cacheReadTokens;
+          cacheWriteTokens += event.cacheWriteTokens;
           outputTokens += event.outputTokens;
           log(
             `[model] ${event.label.padEnd(12)} ${(event.ms / 1000).toFixed(1)}s  ` +
-              `in=${event.inputTokens.toLocaleString()} out=${event.outputTokens.toLocaleString()}  ` +
+              `in=${event.inputTokens.toLocaleString()} cache_read=${event.cacheReadTokens.toLocaleString()} ` +
+              `cache_write=${event.cacheWriteTokens.toLocaleString()} out=${event.outputTokens.toLocaleString()}  ` +
               `stop=${event.stopReason}`,
           );
           break;
@@ -75,7 +80,8 @@ app.post("/api/chat", async (req, res) => {
     log(
       `[done]  total ${((Date.now() - startedAt) / 1000).toFixed(1)}s · ` +
         `${modelCalls} model calls · ${toolCalls} tools · ` +
-        `in=${inputTokens.toLocaleString()} out=${outputTokens.toLocaleString()}`,
+        `in=${inputTokens.toLocaleString()} cache_read=${cacheReadTokens.toLocaleString()} ` +
+        `cache_write=${cacheWriteTokens.toLocaleString()} out=${outputTokens.toLocaleString()}`,
     );
 
     send({ type: "done", answer: result.answer, ms: Date.now() - startedAt, requestId });

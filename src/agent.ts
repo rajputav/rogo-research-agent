@@ -50,7 +50,10 @@ export type AgentEvent =
       type: "model_call";
       label: string;
       ms: number;
+      /** Uncached input tokens. Total input = inputTokens + cacheReadTokens + cacheWriteTokens. */
       inputTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
       outputTokens: number;
       stopReason: string | null;
     }
@@ -81,6 +84,8 @@ async function timedCreate(
     label,
     ms: Date.now() - startedAt,
     inputTokens: response.usage.input_tokens,
+    cacheReadTokens: response.usage.cache_read_input_tokens ?? 0,
+    cacheWriteTokens: response.usage.cache_creation_input_tokens ?? 0,
     outputTokens: response.usage.output_tokens,
     stopReason: response.stop_reason,
   });
@@ -105,7 +110,11 @@ export async function runAgent(
       {
         model: MODEL,
         max_tokens: 16000,
-        system: SYSTEM_PROMPT,
+        // Cache the static prefix (tools + system prompt) explicitly, and let top-level
+        // cache_control cache the growing transcript, so each iteration re-reads the
+        // previous one's prefix instead of reprocessing it.
+        cache_control: { type: "ephemeral" },
+        system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
         tools: toolSchemas,
         messages,
       },

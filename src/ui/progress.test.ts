@@ -9,6 +9,8 @@ const modelCall = (stopReason: string): StreamEvent => ({
   label: "research",
   ms: 2000,
   inputTokens: 1,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
   outputTokens: 1,
   stopReason,
 });

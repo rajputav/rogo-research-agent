@@ -84,7 +84,7 @@ sleeps for a few hundred milliseconds to stand in for a real API.
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm test` | Runs Vitest |
 
-The model defaults to `claude-sonnet-5`. Set `ROGO_MODEL` in `.env` to change it.
+The model defaults to `claude-sonnet-5-5`. Set `ROGO_MODEL` in `.env` to change it.
 
 ## Submitting
 

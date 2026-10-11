@@ -7,7 +7,7 @@ import { companies } from "./data.ts";
 import type { HistoryTurn } from "./history.ts";
 import { executeTool, ToolError, toolSchemas } from "./tools.ts";
 
-const MODEL = process.env.ROGO_MODEL ?? "claude-sonnet-5";
+const MODEL = process.env.ROGO_MODEL ?? "claude-sonnet-5-5";
 const MAX_ITERATIONS = 12;
 
 const client = new Anthropic();
@@ -134,6 +134,14 @@ export async function runAgent(
       },
       onEvent,
     );
+
+    // A declined request returns no usable content; say so rather than falling through to
+    // the "ran out of research steps" message.
+    if (response.stop_reason === "refusal") {
+      answer =
+        "I can't help with that request. Try rephrasing it as a question about a company in our coverage universe.";
+      break;
+    }
 
     messages.push({ role: "assistant", content: response.content });
 

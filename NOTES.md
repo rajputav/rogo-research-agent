@@ -39,6 +39,16 @@ Focus: **answer quality and grounding** (an analyst has to be able to trust and 
     - The server (`src/history.ts`) keeps complete Q&A exchanges only. Above 6 exchanges it drops the oldest in batches of 3, so the start of the history (and with it the cache prefix) stays the same for several turns rather than shifting every turn.
     - New prompt rule: earlier answers are context, not sources. Re-fetch before citing a figure again, or memory would bring back uncited numbers.
     - This makes the clarifying questions from (7) usable: "How fast is Acme growing?" → "Acme Corp" → "How does that compare to Globex?" works, and each turn re-fetches what it cites.
+11. **Stream the answer text**: model calls use `messages.stream`, and text deltas go over the same NDJSON stream and render live. On Sonnet 5, the first answer text arrived at 3–5s instead of 13–19s.
+12. **Switched the default model to `claude-sonnet-5-5`** (same price as Sonnet 5):
+    - Better judgment on the same five questions:
+      - flags the GLBX 1.9% (management) vs 1.1% (financials) gap unprompted
+      - labels Umbrella's 9.6% as total, not organic, growth
+      - offers like-for-like periods
+      - marks guesses as guesses
+    - Totals are 10.6–15.5s (Sonnet 5: 12.3–30.5s).
+    - Added explicit handling for `stop_reason: "refusal"` (5.5 declines in more categories), which would otherwise have shown the "ran out of research steps" message.
+    - Trade-off: it thinks before writing, so first answer text arrives at 9–12s, then streams in about 1s. Next step is to measure `output_config.effort: "medium"`, the recommended setting for multistep tool use. I didn't add server-side refusal fallbacks: they only retry cyber / frontier-LLM declines, which a company-research tool shouldn't hit.
 
 ## Results (five README questions, one run each)
 

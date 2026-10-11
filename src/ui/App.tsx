@@ -1,4 +1,7 @@
 import { useState } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { rehypeCitations } from "./citations.ts";
 
 interface Message {
   role: "user" | "assistant";
@@ -63,11 +66,19 @@ export function App() {
           </div>
         )}
 
-        {messages.map((message, i) => (
-          <div key={i} className={`bubble ${message.role}`}>
-            {message.text}
-          </div>
-        ))}
+        {messages.map((message, i) =>
+          message.role === "assistant" ? (
+            <div key={i} className="bubble assistant markdown">
+              <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeCitations]}>
+                {message.text}
+              </Markdown>
+            </div>
+          ) : (
+            <div key={i} className="bubble user">
+              {message.text}
+            </div>
+          ),
+        )}
 
         {busy && <div className="bubble assistant pending">Thinking…</div>}
       </div>

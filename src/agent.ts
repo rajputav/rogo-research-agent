@@ -76,25 +76,27 @@ export async function runAgent(
       break;
     }
 
-    const toolResults: Anthropic.ToolResultBlockParam[] = [];
+    // Tool calls within a turn are independent, so run them concurrently.
+    // Promise.all preserves order, keeping results aligned with the tool_use blocks.
+    const toolResults: Anthropic.ToolResultBlockParam[] = await Promise.all(
+      toolUses.map(async (use): Promise<Anthropic.ToolResultBlockParam> => {
+        const startedAt = Date.now();
+        onEvent({ type: "tool_start", name: use.name, input: use.input });
 
-    for (const use of toolUses) {
-      const startedAt = Date.now();
-      onEvent({ type: "tool_start", name: use.name, input: use.input });
+        let content: string;
+        try {
+          const output = await executeTool(use.name, use.input as Record<string, unknown>);
+          content = JSON.stringify(output);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          content = `${use.name} returned: ${message}`;
+          onEvent({ type: "tool_failed", name: use.name, message });
+        }
 
-      let content: string;
-      try {
-        const output = await executeTool(use.name, use.input as Record<string, unknown>);
-        content = JSON.stringify(output);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        content = `${use.name} returned: ${message}`;
-        onEvent({ type: "tool_failed", name: use.name, message });
-      }
-
-      onEvent({ type: "tool_end", name: use.name, ms: Date.now() - startedAt });
-      toolResults.push({ type: "tool_result", tool_use_id: use.id, content });
-    }
+        onEvent({ type: "tool_end", name: use.name, ms: Date.now() - startedAt });
+        return { type: "tool_result", tool_use_id: use.id, content };
+      }),
+    );
 
     messages.push({ role: "user", content: toolResults });
   }

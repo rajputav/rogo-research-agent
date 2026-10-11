@@ -4,7 +4,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { companies } from "./data.ts";
-import { executeTool, toolSchemas } from "./tools.ts";
+import { executeTool, ToolError, toolSchemas } from "./tools.ts";
 
 const MODEL = process.env.ROGO_MODEL ?? "claude-sonnet-5";
 const MAX_ITERATIONS = 12;
@@ -130,18 +130,25 @@ export async function runAgent(
         const startedAt = Date.now();
         onEvent({ type: "tool_start", id: use.id, name: use.name, input: use.input });
 
-        let content: string;
+        let result: Anthropic.ToolResultBlockParam;
         try {
           const output = await executeTool(use.name, use.input as Record<string, unknown>);
-          content = JSON.stringify(output);
+          result = { type: "tool_result", tool_use_id: use.id, content: JSON.stringify(output) };
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          content = `${use.name} returned: ${message}`;
           onEvent({ type: "tool_failed", id: use.id, name: use.name, message });
+          // ToolErrors explain how to recover, so the model sees them. Anything else is a
+          // bug in our code: keep its details out of the transcript.
+          result = {
+            type: "tool_result",
+            tool_use_id: use.id,
+            is_error: true,
+            content: err instanceof ToolError ? message : "Internal error while running the tool.",
+          };
         }
 
         onEvent({ type: "tool_end", id: use.id, name: use.name, ms: Date.now() - startedAt });
-        return { type: "tool_result", tool_use_id: use.id, content };
+        return result;
       }),
     );
 
